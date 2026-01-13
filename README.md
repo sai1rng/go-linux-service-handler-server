@@ -31,6 +31,12 @@ curl -X POST http://localhost:8080/docker/stop \
      -d '{"container_id": "my-web"}'
 ```
 
+Status of a Container
+
+```bash
+curl "http://localhost:8080/docker/status?container_id=nodeexporter"
+```
+
 ---
 
 2. Container Fault Injection (Cgroups)
