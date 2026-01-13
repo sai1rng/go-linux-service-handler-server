@@ -8,7 +8,6 @@ import (
 
 // List Containers: GET /containers/json?all=true
 func listContainersHandler(w http.ResponseWriter, r *http.Request) {
-	// We use "http://docker" as a dummy host; the transport hijacks it to the socket
 	resp, err := dockerClient.Get("http://docker/containers/json?all=true")
 	if err != nil {
 		sendJSONResponse(w, http.StatusInternalServerError, "Socket connection failed", err.Error())
@@ -22,7 +21,6 @@ func listContainersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simplify response for client
 	var list []map[string]string
 	for _, c := range containers {
 		name := "unknown"
@@ -39,23 +37,53 @@ func listContainersHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, http.StatusOK, "success", map[string]interface{}{"containers": list, "count": len(list)})
 }
 
-// Status: GET /containers/{id}/json
+// Status: Supports GET (query param) and POST (json body)
 func statusContainerHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("container_id")
-	if id == "" {
-		sendJSONResponse(w, http.StatusBadRequest, "Missing container_id", nil)
+	var containerID string
+
+	// 1. Check Method and Extract ID
+	switch r.Method {
+	case http.MethodGet:
+		containerID = r.URL.Query().Get("container_id")
+
+	case http.MethodPost:
+		var payload ContainerRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			sendJSONResponse(w, http.StatusBadRequest, "Invalid JSON body", err.Error())
+			return
+		}
+		containerID = payload.ContainerID
+
+	default:
+		http.Error(w, "Method not allowed. Use GET or POST", http.StatusMethodNotAllowed)
 		return
 	}
 
-	resp, err := dockerClient.Get(fmt.Sprintf("http://docker/containers/%s/json", id))
-	if err != nil || resp.StatusCode != 200 {
-		sendJSONResponse(w, http.StatusNotFound, "Container not found or error", nil)
+	// 2. Validate ID
+	if containerID == "" {
+		sendJSONResponse(w, http.StatusBadRequest, "container_id is required", nil)
+		return
+	}
+
+	// 3. Call Docker API
+	resp, err := dockerClient.Get(fmt.Sprintf("http://docker/containers/%s/json", containerID))
+	if err != nil {
+		sendJSONResponse(w, http.StatusInternalServerError, "Docker socket error", err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 404 {
+		sendJSONResponse(w, http.StatusNotFound, "Container not found", nil)
+		return
+	}
+
 	var inspect DockerInspectResponse
-	json.NewDecoder(resp.Body).Decode(&inspect)
+	if err := json.NewDecoder(resp.Body).Decode(&inspect); err != nil {
+		sendJSONResponse(w, http.StatusInternalServerError, "Failed to decode Docker response", nil)
+		return
+	}
+
 	sendJSONResponse(w, http.StatusOK, inspect.State.Status, nil)
 }
 
