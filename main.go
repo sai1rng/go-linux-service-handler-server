@@ -42,6 +42,7 @@ func main() {
 }
 
 func setupRoutes() {
+	http.HandleFunc("/health", healthCheckHandler)
 	http.HandleFunc("/docker/start", startContainerHandler)
 	http.HandleFunc("/docker/stop", stopContainerHandler)
 	http.HandleFunc("/docker/status", statusContainerHandler)
