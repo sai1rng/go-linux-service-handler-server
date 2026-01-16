@@ -1,97 +1,101 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
-	"time"
 )
 
-// SSE Handler for Host Faults
+// SSE Structure for JSON messages
+type SSEMessage struct {
+	State string `json:"state"` // start, injecting, log, completed, error
+	Msg   string `json:"msg"`
+	Time  string `json:"time,omitempty"`
+}
+
 func hostFaultSSEHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Set SSE Headers
+	// 1. Setup Headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// 2. Parse Query Params (Since EventSource uses GET)
 	query := r.URL.Query()
 	faultType := query.Get("type")
 	durationStr := query.Get("duration")
-
-	// Default duration
 	duration, _ := strconv.Atoi(durationStr)
 	if duration <= 0 {
 		duration = 10
 	}
 
-	// Create a channel to communicate status updates
-	msgChan := make(chan string)
+	// 2. Prepare Command
+	var cmd *exec.Cmd
+	switch faultType {
+	case "cpu":
+		// verbose mode (-v) ensures stress-ng prints output we can capture
+		cmd = exec.Command("stress-ng", "--cpu", "0", "--timeout", fmt.Sprintf("%ds", duration), "-v")
+	case "memory":
+		cmd = exec.Command("stress-ng", "--vm", "2", "--vm-bytes", "90%", "--timeout", fmt.Sprintf("%ds", duration), "-v")
+	// ... add other cases ...
+	default:
+		sendSSE(w, "error", "Unknown fault type")
+		return
+	}
 
-	// 3. Run Fault Logic in Background Goroutine
+	// 3. Get Pipes for Stdout and Stderr
+	// We merge both because usually tools print errors to stderr and info to stdout
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+
+	// 4. Start the Command
+	if err := cmd.Start(); err != nil {
+		sendSSE(w, "error", fmt.Sprintf("Failed to start command: %v", err))
+		return
+	}
+
+	sendSSE(w, "start", fmt.Sprintf("Command started: %s", faultType))
+
+	// 5. Stream Output in Real-Time
+	// We need to read from both pipes concurrently
+	outputChan := make(chan string)
+
+	go streamPipe(stdout, outputChan)
+	go streamPipe(stderr, outputChan)
+
+	// Close channel when command finishes
 	go func() {
-		defer close(msgChan)
-
-		// Initial State
-		msgChan <- fmt.Sprintf(`{"state": "start", "msg": "Worker received %s fault request"}`, faultType)
-
-		var err error
-
-		switch faultType {
-		case "cpu":
-			msgChan <- fmt.Sprintf(`{"state": "injecting", "msg": "Spiking CPU load for %ds..."}`, duration)
-			// Runs stress-ng blocking
-			err = exec.Command("stress-ng", "--cpu", "0", "--timeout", fmt.Sprintf("%ds", duration)).Run()
-
-		case "memory":
-			msgChan <- fmt.Sprintf(`{"state": "injecting", "msg": "Consuming Memory for %ds..."}`, duration)
-			err = exec.Command("stress-ng", "--vm", "2", "--vm-bytes", "90%", "--timeout", fmt.Sprintf("%ds", duration)).Run()
-
-		case "disk":
-			msgChan <- fmt.Sprintf(`{"state": "injecting", "msg": "Thrashing Disk I/O for %ds..."}`, duration)
-			defer os.Remove("/tmp/chaos_test.dat")
-			err = exec.Command("fio", "--name=chaos", "--ioengine=libaio", "--rw=randwrite", "--bs=64k",
-				"--size=512M", "--numjobs=2", "--direct=1", "--time_based",
-				fmt.Sprintf("--runtime=%d", duration), "--filename=/tmp/chaos_test.dat").Run()
-
-		case "network":
-			iface := "eth0" // Ideally fetch this dynamically
-			msgChan <- fmt.Sprintf(`{"state": "injecting", "msg": "Adding Network Latency on %s..."}`, iface)
-
-			// Add delay
-			exec.Command("tc", "qdisc", "add", "dev", iface, "root", "netem", "delay", "200ms").Run()
-
-			// Wait for duration
-			time.Sleep(time.Duration(duration) * time.Second)
-
-			// Remove delay
-			msgChan <- `{"state": "cleaning", "msg": "Restoring network rules..."}`
-			exec.Command("tc", "qdisc", "del", "dev", iface, "root").Run()
-
-		default:
-			msgChan <- fmt.Sprintf(`{"state": "error", "msg": "Unknown fault type: %s"}`, faultType)
-			return
-		}
-
-		// Final State
-		if err != nil {
-			msgChan <- fmt.Sprintf(`{"state": "error", "msg": "Fault execution failed: %s"}`, err.Error())
-		} else {
-			msgChan <- `{"state": "completed", "msg": "Fault injection finished successfully"}`
-		}
+		cmd.Wait()
+		close(outputChan)
 	}()
 
-	// 4. Stream Loop: Pipe messages to the HTTP response
-	for msg := range msgChan {
-		// SSE format: data: <payload>\n\n
-		fmt.Fprintf(w, "data: %s\n\n", msg)
+	// 6. Loop over output lines and send to UI
+	for line := range outputChan {
+		// Send as a "log" event
+		sendSSE(w, "log", line)
+	}
 
-		// Flush immediately
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
+	sendSSE(w, "completed", "Fault injection finished")
+}
+
+// Helper to read a pipe line-by-line and send to channel
+func streamPipe(pipe io.ReadCloser, ch chan string) {
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		ch <- scanner.Text()
+	}
+}
+
+// Helper to format and flush SSE
+func sendSSE(w http.ResponseWriter, state, msg string) {
+	payload := SSEMessage{State: state, Msg: msg}
+	jsonBytes, _ := json.Marshal(payload)
+
+	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
 	}
 }
