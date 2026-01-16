@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// Global HTTP Client configured for Unix Socket
 var dockerClient *http.Client
 
 func main() {
@@ -25,42 +24,41 @@ func main() {
 		Timeout: 30 * time.Second,
 	}
 
-	// 2. Check Root (Required for accessing the socket usually)
 	if os.Geteuid() != 0 {
-		fmt.Println("⚠️  WARNING: Not running as root. Permission to /var/run/docker.sock might fail.")
+		fmt.Println("⚠️  WARNING: Not running as root. Host faults/Docker socket may fail.")
 	}
 
-	// 3. Define Routes
 	setupRoutes()
 
-	// 4. Start Server
 	port := ":8080"
-	fmt.Printf("🔥 Socket-Based Chaos Server listening on %s\n", port)
+	fmt.Printf("🔥 Worker Node (SSE Enabled) listening on %s\n", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func setupRoutes() {
-	http.HandleFunc("/health", healthCheckHandler)
+	// Standard Docker Management (Keep these as JSON/REST)
 	http.HandleFunc("/docker/start", startContainerHandler)
 	http.HandleFunc("/docker/stop", stopContainerHandler)
-	http.HandleFunc("/docker/status", statusContainerHandler)
 	http.HandleFunc("/docker/list", listContainersHandler)
-	http.HandleFunc("/docker/fault", containerFaultHandler)
-	http.HandleFunc("/host/inject", hostFaultHandler)
+	http.HandleFunc("/docker/status", statusContainerHandler)
+
+	// --- NEW SSE ENDPOINTS ---
+	// Usage: GET /host/inject/stream?type=cpu&duration=10
+	http.HandleFunc("/host/inject/stream", hostFaultSSEHandler)
+	
+	// Usage: GET /docker/fault/stream?container_id=xxx&fault_type=cpu_choke
+	http.HandleFunc("/docker/fault/stream", containerFaultSSEHandler)
 }
 
+// Helper for standard JSON responses (used by management endpoints)
 func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	resp := ResponsePayload{Message: msg}
+	resp := map[string]any{"message": msg, "data": data}
 	if code >= 400 {
-		resp.Error = msg
-		resp.Message = "error"
-	}
-	if data != nil {
-		resp.Data = data
+		resp["error"] = msg
 	}
 	json.NewEncoder(w).Encode(resp)
 }

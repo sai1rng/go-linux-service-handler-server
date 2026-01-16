@@ -19,12 +19,10 @@ type DockerInspectResponse struct {
 
 // Used for updating resources (POST /containers/{id}/update)
 type DockerUpdateConfig struct {
-	// NanoCPUs is an int64 (e.g., 500000000 for 0.5 CPU). 
-	// Alternatively, use CpuQuota/CpuPeriod for older compatibility.
 	CpuPeriod  int64 `json:"CpuPeriod,omitempty"`
 	CpuQuota   int64 `json:"CpuQuota,omitempty"`
 	Memory     int64 `json:"Memory,omitempty"`
-	MemorySwap int64 `json:"MemorySwap,omitempty"` // Set to -1 to disable swap limit logic issues
+	MemorySwap int64 `json:"MemorySwap,omitempty"`
 }
 
 // --- Server Request/Response Structures ---
