@@ -47,18 +47,42 @@ func setupRoutes() {
 	// --- NEW SSE ENDPOINTS ---
 	// Usage: GET /host/inject/stream?type=cpu&duration=10
 	http.HandleFunc("/host/inject/stream", hostFaultSSEHandler)
-	
+
 	// Usage: GET /docker/fault/stream?container_id=xxx&fault_type=cpu_choke
 	http.HandleFunc("/docker/fault/stream", containerFaultSSEHandler)
 }
 
 // Helper for standard JSON responses (used by management endpoints)
+// Helper for standard JSON responses
 func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	resp := map[string]any{"message": msg, "data": data}
-	if code >= 400 {
-		resp["error"] = msg
+
+	resp := ResponsePayload{
+		Message: msg,
+		Time:    time.Now().Format(time.RFC3339), // e.g. 2024-05-20T15:04:05Z
 	}
+
+	if code >= 400 {
+		resp.Error = msg
+		resp.Message = "error"
+	}
+	if data != nil {
+		resp.Data = data
+	}
+
 	json.NewEncoder(w).Encode(resp)
+}
+
+func sendSSE(w http.ResponseWriter, state, msg string) {
+	payload := SSEMessage{
+		State: state,
+		Msg:   msg,
+		Time:  time.Now().Format(time.RFC3339),
+	}
+	jsonBytes, _ := json.Marshal(payload)
+	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }

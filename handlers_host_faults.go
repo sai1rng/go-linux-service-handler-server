@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,11 +9,6 @@ import (
 	"strconv"
 	"sync"
 )
-
-type SSEMessage struct {
-	State string `json:"state"`
-	Msg   string `json:"msg"`
-}
 
 func hostFaultSSEHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. Setup SSE Headers
@@ -172,16 +166,5 @@ func streamPipe(pipe io.ReadCloser, ch chan string) {
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
 		ch <- scanner.Text()
-	}
-}
-
-// Helper to write SSE data
-func sendSSE(w http.ResponseWriter, state, msg string) {
-	payload := SSEMessage{State: state, Msg: msg}
-	jsonBytes, _ := json.Marshal(payload)
-
-	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
 	}
 }

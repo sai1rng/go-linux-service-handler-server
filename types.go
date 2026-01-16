@@ -31,6 +31,7 @@ type ResponsePayload struct {
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
 	Data    any    `json:"data,omitempty"`
+	Time    string `json:"timestamp"`
 }
 
 type ContainerRequest struct {
@@ -50,4 +51,11 @@ type HostFaultRequest struct {
 	Latency     string `json:"latency,omitempty"`
 	Jitter      string `json:"jitter,omitempty"`
 	Loss        string `json:"loss,omitempty"`
+}
+
+// --- SSE Streaming Structure ---
+type SSEMessage struct {
+	State string `json:"state"` // start, injecting, log, completed, error
+	Msg   string `json:"msg"`
+	Time  string `json:"timestamp"` // <--- New Field
 }
