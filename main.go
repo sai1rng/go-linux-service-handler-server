@@ -31,38 +31,42 @@ func main() {
 	setupRoutes()
 
 	port := ":8080"
-	fmt.Printf("🔥 Worker Node (SSE Enabled) listening on %s\n", port)
+	fmt.Printf("🔥 Worker Node listening on %s\n", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func setupRoutes() {
-	// Standard Docker Management (Keep these as JSON/REST)
+	// Utility
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		sendJSONResponse(w, http.StatusOK, "Server is running", nil)
+	})
+
+	// Docker Management (Standard JSON)
 	http.HandleFunc("/docker/start", startContainerHandler)
 	http.HandleFunc("/docker/stop", stopContainerHandler)
 	http.HandleFunc("/docker/list", listContainersHandler)
 	http.HandleFunc("/docker/status", statusContainerHandler)
 
-	// --- NEW SSE ENDPOINTS ---
-	// Usage: GET /host/inject/stream?type=cpu&duration=10
-	http.HandleFunc("/host/inject/stream", hostFaultSSEHandler)
+	// Fault Injection (Streaming SSE)
+	// Usage: GET /host/inject?type=cpu&duration=10
+	http.HandleFunc("/host/inject", hostFaultHandler)
 
-	// Usage: GET /docker/fault/stream?container_id=xxx&fault_type=cpu_choke
-	http.HandleFunc("/docker/fault/stream", containerFaultSSEHandler)
+	// Usage: GET /docker/fault?container_id=...&fault_type=cpu_choke
+	http.HandleFunc("/docker/fault", containerFaultHandler)
 }
 
-// Helper for standard JSON responses (used by management endpoints)
+// --- Shared Helpers ---
+
 // Helper for standard JSON responses
 func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-
 	resp := ResponsePayload{
 		Message: msg,
-		Time:    time.Now().Format(time.RFC3339), // e.g. 2024-05-20T15:04:05Z
+		Time:    time.Now().Format(time.RFC3339),
 	}
-
 	if code >= 400 {
 		resp.Error = msg
 		resp.Message = "error"
@@ -70,10 +74,10 @@ func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	if data != nil {
 		resp.Data = data
 	}
-
 	json.NewEncoder(w).Encode(resp)
 }
 
+// Helper for SSE responses (Streaming)
 func sendSSE(w http.ResponseWriter, state, msg string) {
 	payload := SSEMessage{
 		State: state,
@@ -81,7 +85,10 @@ func sendSSE(w http.ResponseWriter, state, msg string) {
 		Time:  time.Now().Format(time.RFC3339),
 	}
 	jsonBytes, _ := json.Marshal(payload)
+
+	// Format: data: <json>\n\n
 	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
+
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
