@@ -25,15 +25,19 @@ type DockerUpdateConfig struct {
 	MemorySwap int64 `json:"MemorySwap,omitempty"`
 }
 
-// --- Server Request/Response Structures ---
+// --- Unified Server Response Structure ---
 
-type ResponsePayload struct {
-	Message string `json:"message"`
-	Error   string `json:"error,omitempty"`
-	Data    any    `json:"data,omitempty"`
-	Time    string `json:"timestamp"`
+// APIResponse is the unified structure for all API and SSE responses.
+// It's designed to be unmarshalled into a single object on the client-side.
+type APIResponse struct {
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+	State     string `json:"state,omitempty"` // For SSE: start, log, completed, error
+	Data      any    `json:"data,omitempty"`  // For standard JSON responses
+	Error     string `json:"error,omitempty"`
 }
 
+// --- Server Request Structures ---
 type ContainerRequest struct {
 	ContainerID string `json:"container_id"`
 }
@@ -51,11 +55,4 @@ type HostFaultRequest struct {
 	Latency     string `json:"latency,omitempty"`
 	Jitter      string `json:"jitter,omitempty"`
 	Loss        string `json:"loss,omitempty"`
-}
-
-// --- SSE Streaming Structure ---
-type SSEMessage struct {
-	State string `json:"state"` // start, injecting, log, completed, error
-	Msg   string `json:"msg"`
-	Time  string `json:"timestamp"` // <--- New Field
 }

@@ -63,27 +63,32 @@ func setupRoutes() {
 func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	resp := ResponsePayload{
-		Message: msg,
-		Time:    time.Now().Format(time.RFC3339),
+	resp := APIResponse{
+		Message:   msg,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Data:      data,
 	}
+
 	if code >= 400 {
 		resp.Error = msg
 		resp.Message = "error"
 	}
-	if data != nil {
-		resp.Data = data
-	}
+
 	json.NewEncoder(w).Encode(resp)
 }
 
 // Helper for SSE responses (Streaming)
 func sendSSE(w http.ResponseWriter, state, msg string) {
-	payload := SSEMessage{
-		State: state,
-		Msg:   msg,
-		Time:  time.Now().Format(time.RFC3339),
+	payload := APIResponse{
+		State:     state,
+		Message:   msg,
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
+	if state == "error" {
+		payload.Error = msg
+		payload.Message = ""
+	}
+
 	jsonBytes, _ := json.Marshal(payload)
 
 	// Format: data: <json>\n\n
