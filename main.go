@@ -92,7 +92,7 @@ func sendSSE(w http.ResponseWriter, state, msg string) {
 	jsonBytes, _ := json.Marshal(payload)
 
 	// Format: data: <json>\n\n
-	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
+	fmt.Fprintf(w, "%s\n", jsonBytes)
 
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
