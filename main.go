@@ -25,13 +25,13 @@ func main() {
 	}
 
 	if os.Geteuid() != 0 {
-		fmt.Println("⚠️  WARNING: Not running as root. Host faults/Docker socket may fail.")
+		log.Println("⚠️  WARNING: Not running as root. Host faults/Docker socket may fail.")
 	}
 
 	setupRoutes()
 
 	port := ":8080"
-	fmt.Printf("🔥 Worker Node listening on %s\n", port)
+	log.Printf("🔥 Worker Node listening on %s\n", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatal(err)
 	}
@@ -62,19 +62,28 @@ func setupRoutes() {
 // Helper for standard JSON responses
 func sendJSONResponse(w http.ResponseWriter, code int, msg string, data any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
 	resp := APIResponse{
 		Message:   msg,
 		Timestamp: time.Now().Format(time.RFC3339),
 		Data:      data,
 	}
-
 	if code >= 400 {
 		resp.Error = msg
 		resp.Message = "error"
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	jsonBytes, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal JSON response: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"failed to build response"}`))
+		return
+	}
+
+	log.Printf("Sending JSON Response: %s", string(jsonBytes))
+
+	w.WriteHeader(code)
+	w.Write(jsonBytes)
 }
 
 // Helper for SSE responses (Streaming)
@@ -89,10 +98,16 @@ func sendSSE(w http.ResponseWriter, state, msg string) {
 		payload.Message = ""
 	}
 
-	jsonBytes, _ := json.Marshal(payload)
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal SSE payload: %v", err)
+		return
+	}
+
+	log.Printf("Sending SSE: data: %s", string(jsonBytes))
 
 	// Format: data: <json>\n\n
-	fmt.Fprintf(w, "%s", jsonBytes)
+	fmt.Fprintf(w, "data: %s\n\n", jsonBytes)
 
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
